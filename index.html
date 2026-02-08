@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Пицца крутится — головоломка</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(180deg, #1a0f0a 0%, #2d1810 100%);
+      color: #f5e6d3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px;
+      touch-action: manipulation;
+    }
+    h1 {
+      font-size: 1.25rem;
+      margin: 0 0 8px;
+      font-weight: 600;
+    }
+    .timer {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #ffb347;
+    }
+    .timer.warning { color: #ff6b6b; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      max-width: 420px;
+      margin-bottom: 20px;
+    }
+    .pizza-wrap {
+      position: relative;
+      aspect-ratio: 1;
+      max-width: 130px;
+      margin: 0 auto;
+    }
+    .pizza-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 3px solid rgba(255,179,71,0.5);
+      cursor: pointer;
+      touch-action: none;
+    }
+    .pizza-wrap.locked canvas {
+      border-color: #ffb347;
+      box-shadow: 0 0 12px rgba(255,179,71,0.6);
+    }
+    .pizza-wrap.locked::after {
+      content: '🔒';
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      font-size: 14px;
+    }
+    .buttons {
+      display: flex;
+      gap: 16px;
+      margin-top: auto;
+      padding: 12px 0;
+    }
+    .btn {
+      flex: 1;
+      max-width: 160px;
+      padding: 16px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s;
+      touch-action: manipulation;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-rotate-cw {
+      background: linear-gradient(180deg, #ff9a56 0%, #e85d04 100%);
+      color: #fff;
+      box-shadow: 0 4px 0 #c44a03;
+    }
+    .btn-rotate-ccw {
+      background: linear-gradient(180deg, #5c7cfa 0%, #364fc7 100%);
+      color: #fff;
+      box-shadow: 0 4px 0 #2c3d99;
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .hint {
+      font-size: 0.8rem;
+      color: rgba(245,230,211,0.7);
+      margin-top: 8px;
+      text-align: center;
+      max-width: 420px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      padding: 20px;
+    }
+    .modal.visible { display: flex; }
+    .modal-content {
+      background: linear-gradient(180deg, #2d1810 0%, #1a0f0a 100%);
+      border: 2px solid #ffb347;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      max-width: 320px;
+    }
+    .modal h2 { margin: 0 0 12px; font-size: 1.5rem; }
+    .modal .score { font-size: 2rem; color: #ffb347; font-weight: 700; margin: 8px 0; }
+    .modal button {
+      margin-top: 16px;
+      padding: 12px 32px;
+      font-size: 1rem;
+      font-weight: 600;
+      background: #e85d04;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Пицца крутится</h1>
+  <div class="timer" id="timer">100</div>
+  <div class="grid" id="grid"></div>
+  <div class="buttons">
+    <button type="button" class="btn btn-rotate-ccw" id="rotateCCW">↺</button>
+    <button type="button" class="btn btn-rotate-cw" id="rotateCW">↻</button>
+  </div>
+  <p class="hint">Тап по центру пиццы — закрепить/открепить. Тап по крайнему кусочку (к соседу) — обмен с соседней пиццей.</p>
+
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <h2 id="modalTitle">Победа!</h2>
+      <p>Оставшиеся ходы:</p>
+      <div class="score" id="finalScore">0</div>
+      <button type="button" id="modalBtn">Играть снова</button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const PIZZA_NAMES = ['аррива.avif', 'Додо.avif', 'масала.avif', 'пепперони фреш.avif', 'терияки.avif', 'хрен.avif'];
+      const PIZZAS = 6;
+      const SECTORS = 8;
+      const MAX_MOVES = 100;
+      // Сетка: 0 1 2 / 3 4 5. Секторы: 0=верх, 2=право, 4=низ, 6=лево.
+      const NEIGHBOR_RIGHT = [1, 2, -1, 4, 5, -1];
+      const NEIGHBOR_BOTTOM = [3, 4, 5, -1, -1, -1];
+      const NEIGHBOR_LEFT = [-1, 0, 1, -1, 3, 4];
+      const NEIGHBOR_TOP = [-1, -1, -1, 0, 1, 2];
+      const VISUAL_TOP = 0, VISUAL_RIGHT = 2, VISUAL_BOTTOM = 4, VISUAL_LEFT = 6;
+      const ANGLE_OFFSET = 180 / SECTORS;
+
+      let images = [];
+      let grid = [];   // grid[cellIndex][slotIndex] = { pizzaId, sectorIndex }
+      let rotation = []; // rotation[cellIndex] = 0..5
+      let locked = [];   // locked[cellIndex] = bool
+      let lockedIndex = -1;
+      let moves = MAX_MOVES;
+      let gameOver = false;
+
+      const gridEl = document.getElementById('grid');
+      const timerEl = document.getElementById('timer');
+      const modalEl = document.getElementById('modal');
+      const modalTitle = document.getElementById('modalTitle');
+      const finalScoreEl = document.getElementById('finalScore');
+      const modalBtn = document.getElementById('modalBtn');
+
+      function loadImages() {
+        return Promise.all(PIZZA_NAMES.map((name, i) => {
+          return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => { images[i] = img; resolve(); };
+            img.onerror = () => reject(new Error('Failed to load ' + name));
+            img.src = name;
+          });
+        }));
+      }
+
+      function shuffleSectors() {
+        const pairs = [];
+        for (let p = 0; p < PIZZAS; p++)
+          for (let s = 0; s < SECTORS; s++)
+            pairs.push({ pizzaId: p, sectorIndex: s });
+        for (let i = pairs.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+        }
+        for (let c = 0; c < PIZZAS; c++) {
+          grid[c] = [];
+          for (let s = 0; s < SECTORS; s++)
+            grid[c][s] = { ...pairs[c * SECTORS + s] };
+        }
+        rotation = [0,0,0,0,0,0];
+        locked = [false,false,false,false,false,false];
+        lockedIndex = -1;
+        moves = MAX_MOVES;
+        gameOver = false;
+      }
+
+      function getDisplaySlot(cellIndex, slotIndex) {
+        const r = rotation[cellIndex];
+        const idx = (slotIndex - r + SECTORS) % SECTORS;
+        return grid[cellIndex][idx];
+      }
+
+      function drawPizza(ctx, cellIndex, size) {
+        const cx = size / 2, cy = size / 2;
+        const radius = Math.min(cx, cy) - 2;
+        for (let s = 0; s < SECTORS; s++) {
+          const data = getDisplaySlot(cellIndex, s);
+          const img = images[data.pizzaId];
+          if (!img) continue;
+          const startAngle = (s * 360 / SECTORS - 90 - ANGLE_OFFSET) * Math.PI / 180;
+          const endAngle = ((s + 1) * 360 / SECTORS - 90 - ANGLE_OFFSET) * Math.PI / 180;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, radius, startAngle, endAngle);
+          ctx.closePath();
+          ctx.clip();
+          const sectorStart = (data.sectorIndex * 360 / SECTORS) * Math.PI / 180;
+          ctx.translate(cx, cy);
+          ctx.rotate(startAngle - sectorStart);
+          const scale = (radius * 2.2) / Math.min(img.width, img.height);
+          ctx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
+          ctx.restore();
+        }
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.lineWidth = 1.2;
+        for (let s = 0; s <= SECTORS; s++) {
+          const a = (s * 360 / SECTORS - 90 - ANGLE_OFFSET) * Math.PI / 180;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + radius * Math.cos(a), cy + radius * Math.sin(a));
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function createCanvases() {
+        gridEl.innerHTML = '';
+        const size = Math.min(130, Math.floor((window.innerWidth - 48) / 3 - 20));
+        for (let i = 0; i < PIZZAS; i++) {
+          const wrap = document.createElement('div');
+          wrap.className = 'pizza-wrap' + (locked[i] ? ' locked' : '');
+          wrap.dataset.cell = i;
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          canvas.dataset.cell = i;
+          wrap.appendChild(canvas);
+          gridEl.appendChild(wrap);
+
+          (function (cellIndex) {
+            canvas.addEventListener('click', function (e) {
+              if (gameOver) return;
+              const rect = canvas.getBoundingClientRect();
+              const scaleX = canvas.width / rect.width;
+              const scaleY = canvas.height / rect.height;
+              const x = (e.clientX - rect.left) * scaleX - canvas.width / 2;
+              const y = (e.clientY - rect.top) * scaleY - canvas.height / 2;
+              const r = Math.hypot(x, y);
+              const radius = Math.min(canvas.width, canvas.height) / 2 - 2;
+              if (r < radius * 0.35) {
+                if (lockedIndex === cellIndex) {
+                  lockedIndex = -1;
+                  locked[cellIndex] = false;
+                } else {
+                  if (lockedIndex >= 0) locked[lockedIndex] = false;
+                  lockedIndex = cellIndex;
+                  locked[cellIndex] = true;
+                }
+                updateUI();
+                redrawAll();
+                return;
+              }
+              const angle = Math.atan2(y, x);
+              const angleDeg = (angle * 180 / Math.PI + 90 + ANGLE_OFFSET + 360) % 360;
+              let sector = Math.floor(angleDeg / (360 / SECTORS)) % SECTORS;
+              if (sector >= SECTORS) sector = 0;
+
+              let neighbor = -1;
+              let mySlot, otherSlot;
+              if (sector === VISUAL_RIGHT && (neighbor = NEIGHBOR_RIGHT[cellIndex]) >= 0) {
+                mySlot = (VISUAL_RIGHT + rotation[cellIndex]) % SECTORS;
+                otherSlot = (VISUAL_LEFT + rotation[neighbor]) % SECTORS;
+              } else if (sector === VISUAL_LEFT && (neighbor = NEIGHBOR_LEFT[cellIndex]) >= 0) {
+                mySlot = (VISUAL_LEFT + rotation[cellIndex]) % SECTORS;
+                otherSlot = (VISUAL_RIGHT + rotation[neighbor]) % SECTORS;
+              } else if (sector === VISUAL_BOTTOM && (neighbor = NEIGHBOR_BOTTOM[cellIndex]) >= 0) {
+                mySlot = (VISUAL_BOTTOM + rotation[cellIndex]) % SECTORS;
+                otherSlot = (VISUAL_TOP + rotation[neighbor]) % SECTORS;
+              } else if (sector === VISUAL_TOP && (neighbor = NEIGHBOR_TOP[cellIndex]) >= 0) {
+                mySlot = (VISUAL_TOP + rotation[cellIndex]) % SECTORS;
+                otherSlot = (VISUAL_BOTTOM + rotation[neighbor]) % SECTORS;
+              }
+              if (neighbor >= 0) {
+                const a = grid[cellIndex][mySlot];
+                const b = grid[neighbor][otherSlot];
+                grid[cellIndex][mySlot] = { ...b };
+                grid[neighbor][otherSlot] = { ...a };
+                useMove();
+                if (checkWin()) endGame(true);
+              }
+              updateUI();
+              redrawAll();
+            });
+          })(i);
+        }
+        redrawAll();
+      }
+
+      function redrawAll() {
+        const size = Math.min(130, Math.floor((window.innerWidth - 48) / 3 - 20));
+        gridEl.querySelectorAll('.pizza-wrap canvas').forEach((canvas, i) => {
+          const ctx = canvas.getContext('2d');
+          canvas.width = size;
+          canvas.height = size;
+          drawPizza(ctx, i, size);
+        });
+        gridEl.querySelectorAll('.pizza-wrap').forEach((wrap, i) => {
+          wrap.className = 'pizza-wrap' + (locked[i] ? ' locked' : '');
+        });
+      }
+
+      function updateUI() {
+        timerEl.textContent = moves;
+        timerEl.classList.toggle('warning', moves <= 20);
+        document.getElementById('rotateCW').disabled = gameOver || moves <= 0;
+        document.getElementById('rotateCCW').disabled = gameOver || moves <= 0;
+      }
+
+      function useMove() {
+        moves--;
+        updateUI();
+        if (moves <= 0 && !checkWin()) endGame(false);
+      }
+
+      function rotateAll(clockwise) {
+        if (gameOver || moves <= 0) return;
+        const delta = clockwise ? 1 : -1;
+        for (let i = 0; i < PIZZAS; i++) {
+          if (!locked[i]) rotation[i] = (rotation[i] + delta + SECTORS) % SECTORS;
+        }
+        useMove();
+        if (checkWin()) endGame(true);
+        redrawAll();
+      }
+
+      function checkWin() {
+        for (let c = 0; c < PIZZAS; c++) {
+          const base = getDisplaySlot(c, 0).pizzaId;
+          for (let s = 0; s < SECTORS; s++) {
+            const d = getDisplaySlot(c, s);
+            if (d.pizzaId !== base || d.sectorIndex !== s) return false;
+          }
+        }
+        return true;
+      }
+
+      function endGame(won) {
+        gameOver = true;
+        modalTitle.textContent = won ? 'Победа!' : 'Ходы закончились';
+        finalScoreEl.textContent = moves;
+        modalEl.classList.add('visible');
+      }
+
+      modalBtn.addEventListener('click', function () {
+        modalEl.classList.remove('visible');
+        shuffleSectors();
+        createCanvases();
+        updateUI();
+      });
+
+      document.getElementById('rotateCW').addEventListener('click', function () { rotateAll(true); });
+      document.getElementById('rotateCCW').addEventListener('click', function () { rotateAll(false); });
+
+      loadImages().then(function () {
+        shuffleSectors();
+        createCanvases();
+        updateUI();
+      }).catch(function (err) {
+        timerEl.textContent = 'Ошибка загрузки: ' + err.message;
+      });
+    })();
+  </script>
+</body>
+</html>
