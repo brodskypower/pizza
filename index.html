@@ -136,10 +136,85 @@
       border-radius: 8px;
       cursor: pointer;
     }
+    .header-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+    }
+    .header-row h1 { margin: 0; }
+    .btn-info {
+      position: absolute;
+      right: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,179,71,0.6);
+      background: transparent;
+      color: #f5e6d3;
+      font-size: 1.1rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .btn-info.visible { display: flex; }
+    .onboarding {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 20;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      cursor: pointer;
+    }
+    .onboarding.visible { display: flex; }
+    .onboarding-slide {
+      display: none;
+      text-align: center;
+      font-size: 1.35rem;
+      line-height: 1.4;
+      max-width: 320px;
+    }
+    .onboarding-slide.active { display: block; }
+    .onboarding-dots {
+      position: absolute;
+      bottom: 32px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .onboarding-dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+    }
+    .onboarding-dots span.active { background: #ffb347; }
+    .pizza-wrap.swap-flash {
+      animation: swapFlash 0.4s ease-out;
+    }
+    @keyframes swapFlash {
+      0% { filter: brightness(1.5); }
+      50% { filter: brightness(1.9); }
+      100% { filter: brightness(1); }
+    }
   </style>
 </head>
 <body>
-  <h1>Пицца крутится</h1>
+  <div class="header-row">
+    <h1>Пицца крутится</h1>
+    <button type="button" class="btn-info" id="btnInfo" title="Помощь">i</button>
+  </div>
   <div class="timer" id="timer">100</div>
   <div class="grid" id="grid"></div>
   <div class="buttons">
@@ -154,6 +229,16 @@
       <p>Оставшиеся ходы:</p>
       <div class="score" id="finalScore">0</div>
       <button type="button" id="modalBtn">Играть снова</button>
+    </div>
+  </div>
+
+  <div class="onboarding" id="onboarding">
+    <div class="onboarding-slide active" data-slide="0">Собери пиццы снова</div>
+    <div class="onboarding-slide" data-slide="1">Меняй местами соседние кусочки разных пицц</div>
+    <div class="onboarding-slide" data-slide="2">Вращай все пиццы разом, чтобы поменять</div>
+    <div class="onboarding-slide" data-slide="3">Тапни на пиццу, чтобы заблокировать её вращение или тапни снова чтобы убрать блок</div>
+    <div class="onboarding-dots" id="onboardingDots">
+      <span class="active"></span><span></span><span></span><span></span>
     </div>
   </div>
 
@@ -185,6 +270,9 @@
       const modalTitle = document.getElementById('modalTitle');
       const finalScoreEl = document.getElementById('finalScore');
       const modalBtn = document.getElementById('modalBtn');
+      const onboardingEl = document.getElementById('onboarding');
+      const onboardingDotsEl = document.getElementById('onboardingDots');
+      const btnInfo = document.getElementById('btnInfo');
 
       function loadImages() {
         return Promise.all(PIZZA_NAMES.map((name, i) => {
@@ -307,17 +395,17 @@
               let neighbor = -1;
               let mySlot, otherSlot;
               if (sector === VISUAL_RIGHT && (neighbor = NEIGHBOR_RIGHT[cellIndex]) >= 0) {
-                mySlot = (VISUAL_RIGHT + rotation[cellIndex]) % SECTORS;
-                otherSlot = (VISUAL_LEFT + rotation[neighbor]) % SECTORS;
+                mySlot = (VISUAL_RIGHT - rotation[cellIndex] + SECTORS) % SECTORS;
+                otherSlot = (VISUAL_LEFT - rotation[neighbor] + SECTORS) % SECTORS;
               } else if (sector === VISUAL_LEFT && (neighbor = NEIGHBOR_LEFT[cellIndex]) >= 0) {
-                mySlot = (VISUAL_LEFT + rotation[cellIndex]) % SECTORS;
-                otherSlot = (VISUAL_RIGHT + rotation[neighbor]) % SECTORS;
+                mySlot = (VISUAL_LEFT - rotation[cellIndex] + SECTORS) % SECTORS;
+                otherSlot = (VISUAL_RIGHT - rotation[neighbor] + SECTORS) % SECTORS;
               } else if (sector === VISUAL_BOTTOM && (neighbor = NEIGHBOR_BOTTOM[cellIndex]) >= 0) {
-                mySlot = (VISUAL_BOTTOM + rotation[cellIndex]) % SECTORS;
-                otherSlot = (VISUAL_TOP + rotation[neighbor]) % SECTORS;
+                mySlot = (VISUAL_BOTTOM - rotation[cellIndex] + SECTORS) % SECTORS;
+                otherSlot = (VISUAL_TOP - rotation[neighbor] + SECTORS) % SECTORS;
               } else if (sector === VISUAL_TOP && (neighbor = NEIGHBOR_TOP[cellIndex]) >= 0) {
-                mySlot = (VISUAL_TOP + rotation[cellIndex]) % SECTORS;
-                otherSlot = (VISUAL_BOTTOM + rotation[neighbor]) % SECTORS;
+                mySlot = (VISUAL_TOP - rotation[cellIndex] + SECTORS) % SECTORS;
+                otherSlot = (VISUAL_BOTTOM - rotation[neighbor] + SECTORS) % SECTORS;
               }
               if (neighbor >= 0) {
                 const a = grid[cellIndex][mySlot];
@@ -325,6 +413,7 @@
                 grid[cellIndex][mySlot] = { ...b };
                 grid[neighbor][otherSlot] = { ...a };
                 useMove();
+                playSwapAnimation(cellIndex, neighbor);
                 if (checkWin()) endGame(true);
               }
               updateUI();
@@ -333,6 +422,16 @@
           })(i);
         }
         redrawAll();
+      }
+
+      function playSwapAnimation(cellA, cellB) {
+        const wraps = gridEl.querySelectorAll('.pizza-wrap');
+        if (wraps[cellA]) wraps[cellA].classList.add('swap-flash');
+        if (wraps[cellB]) wraps[cellB].classList.add('swap-flash');
+        setTimeout(function () {
+          wraps[cellA] && wraps[cellA].classList.remove('swap-flash');
+          wraps[cellB] && wraps[cellB].classList.remove('swap-flash');
+        }, 400);
       }
 
       function redrawAll() {
@@ -400,13 +499,51 @@
       document.getElementById('rotateCW').addEventListener('click', function () { rotateAll(true); });
       document.getElementById('rotateCCW').addEventListener('click', function () { rotateAll(false); });
 
-      loadImages().then(function () {
-        shuffleSectors();
-        createCanvases();
-        updateUI();
-      }).catch(function (err) {
-        timerEl.textContent = 'Ошибка загрузки: ' + err.message;
+      function setOnboardingSlide(index) {
+        onboardingEl.querySelectorAll('.onboarding-slide').forEach(function (el, i) {
+          el.classList.toggle('active', i === index);
+        });
+        onboardingDotsEl.querySelectorAll('span').forEach(function (dot, i) {
+          dot.classList.toggle('active', i === index);
+        });
+      }
+
+      function showOnboarding(fromInfo) {
+        setOnboardingSlide(0);
+        onboardingEl.classList.add('visible');
+        onboardingEl.dataset.fromInfo = fromInfo ? '1' : '0';
+      }
+
+      function closeOnboardingAndMaybeStart() {
+        onboardingEl.classList.remove('visible');
+        var fromInfo = onboardingEl.dataset.fromInfo === '1';
+        if (!fromInfo) startGame();
+      }
+
+      function startGame() {
+        btnInfo.classList.add('visible');
+        loadImages().then(function () {
+          shuffleSectors();
+          createCanvases();
+          updateUI();
+        }).catch(function (err) {
+          timerEl.textContent = 'Ошибка загрузки: ' + err.message;
+        });
+      }
+
+      onboardingEl.addEventListener('click', function () {
+        var active = onboardingEl.querySelector('.onboarding-slide.active');
+        var idx = active ? parseInt(active.dataset.slide, 10) : 0;
+        if (idx < 3) {
+          setOnboardingSlide(idx + 1);
+        } else {
+          closeOnboardingAndMaybeStart();
+        }
       });
+
+      btnInfo.addEventListener('click', function () { showOnboarding(true); });
+
+      showOnboarding(false);
     })();
   </script>
 </body>
